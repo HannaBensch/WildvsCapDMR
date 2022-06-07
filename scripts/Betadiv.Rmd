@@ -1,0 +1,381 @@
+---
+title: "Captive VS Wild DMR beta diversity"
+author: "hanna.bensch@lnu.se"
+date: "`r format(Sys.time(), '%Y-%m-%d')`"
+output:
+   html_document:
+        toc: yes
+        toc_float:
+          collapse: no
+        fig_caption: yes
+        code_folding: hide
+bibliography: 
+    - grateful-refs.bib
+biblio-style: apalike
+link-citations: yes
+---
+
+
+```{r libraries, include = FALSE}
+suppressPackageStartupMessages(library(readr))
+suppressPackageStartupMessages(library(dplyr, warn.conflicts = FALSE))
+suppressPackageStartupMessages(library(tidyr))
+suppressPackageStartupMessages(library(stringr))
+suppressPackageStartupMessages(library(ggplot2))
+suppressPackageStartupMessages(library(kfigr))
+suppressPackageStartupMessages(library(knitr))
+suppressPackageStartupMessages(library(vegan))
+suppressPackageStartupMessages(library(ggpubr))
+suppressPackageStartupMessages(library(wesanderson))
+suppressPackageStartupMessages(library(ape))
+suppressPackageStartupMessages(library(grateful))
+suppressPackageStartupMessages(library(compositions))
+```
+
+```{r constants}
+```
+
+```{r read-data, echo=FALSE, message=FALSE, warning=FALSE}
+asvs <- read_tsv("../data/asv_table.tsv", col_types = 'ccid')
+
+metadata <- read_delim("../data/metadata.csv", delim = ",", col_types = cols(
+  .default = col_character(),
+  SampleDate = col_date(format = ""),
+  massindex = col_double()
+)) %>% 
+  left_join( # get the nb reads 
+    asvs %>% select(sample, count) %>% 
+    group_by(sample) %>% summarise(NbReads = sum(count), .groups = 'drop'))
+
+taxonomy <- read_tsv("../data/taxonomy.tsv", col_types =  cols(
+  asv = col_character(),
+  kingdom = col_character(),
+  phylum = col_character(),
+  class = col_character(),
+  order = col_character(),
+  family = col_character(),
+  genus = col_character(),
+  species = col_character()
+)) %>%
+  naniar::replace_with_na_all(condition = ~.x %in%
+                                c("uncultured bacterium", "Ambiguous_taxa","uncultured")) # replace all that is "uncultured bacterium", "uncultured"  & Ambiguous_taxa"with NA
+
+# get ancomb asvs data
+ancomb <- read_tsv("../data/TableS2.tsv") # created in ancom.Rmd script
+
+# get palette
+pal <- wes_palette("Darjeeling1")
+pal <- pal[c(2,3)]
+pal <- rev(pal) # change order
+pal2 <- pal
+pal2[2:3] <- c('grey', pal2[c(2,3)])
+```
+
+
+# PCA CLR-transformed counts
+
+```{r clr1, include=FALSE}
+# make a matrix with row sample and column ASV with counts
+m1 <- asvs  %>% 
+  select(asv, sample) %>%
+  complete(asv, sample) %>% 
+  left_join(asvs %>% select(asv, count, sample)) %>%
+  mutate( count = replace_na(count, 0),
+          count = count + 0.65) %>% # add psuedo count of 0.65
+  pivot_wider(names_from = 'asv', values_from='count') %>% 
+  tibble::column_to_rownames('sample') %>% as.matrix()
+
+### clr-transformation of the counts ###
+clr <- t(apply(t(m1), 2, compositions::clr))
+
+rm(m1)
+```
+
+
+
+```{r PCAclr1, message=FALSE, warning=FALSE, include=FALSE}
+### Perform the PCA ###
+pca <- vegan::rda(clr)
+
+pca.samples <- pca$CA$u %>% data.frame() %>% tibble::rownames_to_column('sample')
+pca.asv    <- pca$CA$v %>% data.frame() %>% tibble::rownames_to_column('asv')
+pca.eigs    <- pca$CA$eig %>% data.frame() %>% tibble::rownames_to_column('pc') %>%
+    rename(eigval = 2) %>%
+  mutate(propexpl = eigval/sum(eigval))
+
+# Calculate the variance explained by PC1, PC2 & PC3
+d.mvar <- sum(pca$sdev^2) # total variance
+PC1 <- paste("PC1 ","(",round(pca.eigs[1,3]*100,1),"%",")", sep="" )
+PC2 <- paste("PC2 ","(",round(pca.eigs[2,3]*100,1),"%",")",sep="")
+PC3 <- paste("PC3 ","(",round(pca.eigs[3,3]*100,1),"%",")",sep="")
+
+```
+
+
+<p>&nbsp;</p>
+
+
+```{r clrplot1, echo=FALSE, message=FALSE,  warning=FALSE, echo=FALSE,  fig.height=6, fig.width=12,fig.cap='**Fig 1.** PCA on clr transformed counts with pseudocount 0.65. Colour by Population.'}
+#Add metadata to pca df
+df1 <- pca.samples  %>% select(sample, PC1, PC2, PC3) %>% 
+  left_join(metadata)
+
+PCACLR1 <- df1 %>% 
+  ggplot( aes(x = PC1, y = PC2)) + 
+  geom_point(aes(col = Population), size = 2) +  
+  scale_colour_manual( values = pal) +
+  ylab(PC2) +
+  xlab(PC1) +
+ theme( axis.title = element_text(size =25, face = "bold"),
+        axis.text = element_text(size =20),
+        panel.background = element_blank(),
+        plot.title = element_text(size=22, face ="bold"),
+        legend.position = "top",
+        legend.key=element_blank(),
+        legend.title = element_blank(),
+        legend.text = element_text(size =20),
+        panel.border = element_rect(colour = "black", fill=NA))+
+  guides(alpha =FALSE, fill =FALSE)
+PCACLR1    
+```
+
+
+*Note*: also tested pseudo count 1/Library size, got similar results with minor differences in % explained PC1 and PC2 - 0.65 had slightly better explanation PC1.
+
+
+<p>&nbsp;</p>
+
+
+```{r clrplot2, echo=FALSE, message=FALSE, warning=FALSE, echo=FALSE, fig.height=6, fig.width=12,fig.cap='**Fig 2.** PCA on clr transformed counts with pseudo count 0.65, PC1 and PC3. Colour by Population.' }
+
+# plot by population
+PCACLR1b <- df1 %>% 
+  ggplot( aes(x = PC1,y = PC3)) + 
+  geom_point(aes(col=Population), size = 2) +  
+  scale_colour_manual( values = pal) +
+  ylab(PC3) +
+  xlab(PC1) +
+ theme( axis.title = element_text(size =25, face = "bold"),
+        axis.text = element_text(size =20),
+        panel.background = element_blank(),
+        plot.title = element_text(size=22, face ="bold"),
+        legend.position = "top",
+        legend.key=element_blank(),
+        legend.title = element_blank(),
+        legend.text = element_text(size =20),
+        panel.border = element_rect(colour = "black", fill=NA))+
+  guides(alpha =FALSE, fill =FALSE)
+
+PCACLR1b
+```
+
+
+<p>&nbsp;</p>
+
+
+```{r clrplotPC1P2PC3, echo=FALSE, fig.cap = '**Fig 3.** PCA on clr transformed counts with pseudocount 0.65, A) PC1 and PC2, B) PC1 and PC3 Colour by Population.', message=FALSE, warning=FALSE, fig.width=12, fig.height=6}
+
+ggarrange(PCACLR1 + ggtitle("A"),
+          PCACLR1b + ggtitle("B"),
+          common.legend = TRUE, nrow= 1)
+
+```
+
+
+<p>&nbsp;</p>
+
+
+```{r PC1density, echo=FALSE, fig.cap = '**Fig 3b.** Density of PC1 values wild and captive samples. Another way to plot separation.', message=FALSE, warning=FALSE, fig.width=12, fig.height=8}
+df1 %>% ggplot( aes(x=PC1, fill=Population)) +
+  geom_density() +
+  scale_fill_manual( values = pal) +
+  theme(axis.title=element_text(size=18,face="bold"),
+        axis.text = element_text(size=14),
+        panel.grid = element_blank(),
+        legend.key=element_blank(),
+        legend.position = "top",
+        legend.title = element_blank(),
+        legend.text = element_text( size=14, face="bold")) +
+  xlim(-0.17, 0.16)
+```
+
+<p>&nbsp;</p>
+
+
+**Permanova Wild vs Captive on clrcounts, with Plate number nested strata argument:**
+```{r permanova-adonis-clr, echo=FALSE, message=FALSE, warning=FALSE}
+metadf <- metadata %>% arrange(sample) %>% tibble::column_to_rownames('sample') %>% data.frame()
+clrdist <- clr %>% vegdist(method = "euclidean") 
+
+#adonis2
+perm <- how(nperm = 9999)
+setBlocks(perm) <- with(metadf, Plate_No)
+set.seed(2000)
+adonis2(clrdist ~ NbReads+ Population, data = metadf, permutations = perm, by = "margin")
+
+# betadisp
+set.seed(2000)
+betadisp <- betadisper(clrdist, metadf$Population)
+anova(betadisp) 
+#plot(betadisp)
+```
+
+
+<p>&nbsp;</p>
+
+## Loading scores PC1 CLR
+```{r loadingCLR }
+#| echo = FALSE, 
+#| fig.width = 12, fig.height = 8, 
+#| fig.cap = '**Fig 4.** Identifying taxa more common in wild and captive animals from loading scores of ASVS driving dissimilarity on PC1 on clr transformed counts, A) Loading scores PC1 sorted for all ASV in dataset, the top  50 (1%) with the largest PC1 loadings are filled in green blue and correspond to ASVS characterizing wild gut microbiota while the bottom  50 (1%) with the lowest PC1 are filled in orange and correspond to ASVS characterizing captive gut microbiota of Damaraland mole-rats. B) N of ASVS belonging to phylum as either associated with "captive" or "wild".',
+#|  message = FALSE, 
+#|  warning = FALSE
+
+pca.asv <- pca.asv %>% arrange(PC1)  %>%  mutate(ASV = 1:nrow(.))
+maxasv <- max(pca.asv$ASV)
+
+loadings <- 
+  pca.asv %>% 
+  select(asv, PC1) %>% 
+  left_join(taxonomy) %>% # join in taxa
+  mutate(
+    phylum = ifelse(is.na(phylum), sprintf("%s unclassified", kingdom), phylum),
+    class = ifelse(is.na(class), sprintf("%s unclassified", str_remove(phylum, "unclassified")), class),
+    order = ifelse(is.na(order), sprintf("%s unclassified", str_remove(class, "unclassified")), order),
+    family = ifelse(is.na(family), sprintf("%s unclassified", str_remove(order, "unclassified")), family),
+    genus = ifelse(is.na(genus), sprintf("%s unclassified", str_remove(family, "unclassified")), genus),
+    species = ifelse(is.na(species), sprintf("%s unclassified", str_remove(genus, "unclassified")), species)) %>%
+  arrange(PC1) %>% 
+  mutate(ASV = 1:nrow(.),
+         col = case_when( ASV <= round(maxasv * 0.02)  ~ "Captive", # Mark bar to highlight in loading plot bottom and top ~2% = 101 ASVs each direction 
+                          ASV > (round(maxasv * 0.98)) ~ "Wild", 
+                          TRUE ~ "NA"),
+         .before = 1) 
+
+load <- loadings %>%
+  ggplot(aes(x = ASV, y = PC1, fill = col)) +
+  geom_col(width = 1) + 
+  scale_fill_manual(breaks = c("Captive", "", "Wild" ), values = pal2) +
+  ylab("Loading score PC1") +
+  guides(fill = guide_legend(title = "Overrepresented in", title.position = "left")) +
+  scale_x_continuous(limits = c(-10 ,maxasv + 10), expand = c(0, 0)) +
+             scale_y_continuous("Loading score PC1", 
+                                sec.axis = sec_axis(~ ., name = "Loading score PC1")) +
+  theme(axis.text.x = element_blank(),
+        axis.ticks.x = element_blank(),
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        panel.background = element_blank(),
+        legend.position = "top",
+        legend.text = element_text(size=15),
+        legend.title = element_text(size=15),
+        axis.title = element_text(size=12),
+        axis.text.y = element_text(size=12)) 
+
+barsload <- loadings  %>%
+  filter(col != "NA") %>% # pick out the one highlighted in plot A
+  ggplot(aes(x = phylum)) +
+  geom_bar() +
+  facet_wrap(~col) +
+  coord_flip() +
+  theme(legend.position = "top",
+        axis.title.x = element_text(size=15),
+        axis.text.y = element_text(size=15),
+        axis.text.x = element_text(size=15),
+        strip.text = element_text(size=20),
+        panel.background=element_rect(fill='white', colour='black'),
+        strip.background=element_rect(fill='white', colour='white')) +
+  xlab("") +
+  ylab("N ASVs")
+
+clrload <- ggarrange(load, barsload, ncol=1, nrow =2,
+          labels = c("A", "B"))
+clrload
+```
+
+
+<p>&nbsp;</p>
+
+
+
+```{r loadingCLRfam, echo=FALSE, fig.cap='**Fig 5.** A) Loading scores PC1 sorted for all ASV in dataset, the top  2 % with the largest PC1 loadings are filled in green blue and correspond to ASVS characterizing wild gut microbiota while the bottom  2% with the lowest PC1 are filled in orange and correspond to ASVS characterizing captive gut microbiota of Damaraland mole-rats. B) Loading scores of ASVs of the families with the ASVs in the top (1%) largest and the bottom (1%) PC1 loadings  combined as families.', fig.height=11, fig.width=10, message=FALSE, warnings=FALSE }
+loadings2 <- loadings  %>%
+  rename(overrep_inLoading = col) %>%
+  left_join(ancomb %>% select(asv, DiffAb, Coef, AdjPval, overrep_inA)) 
+
+signasvs  <- loadings2 %>%
+  filter(!is.na(overrep_inA)) %>% # to get N asvs identified as sign abundant
+  mutate(Pfam = paste(phylum, family, sep= " "), .before =1) %>%
+  arrange(Pfam) %>% 
+  group_by(Pfam, overrep_inA) %>%
+  summarise( n = n())  %>%
+  ungroup() %>%
+  complete(Pfam, overrep_inA) %>% 
+  mutate(n = replace_na(n, 0),
+         ypos = case_when(overrep_inA == "Captive" ~ -1.4,
+                          overrep_inA == "Wild" ~ 2.1,
+                          ))
+
+#signasvs %>% summarise(n = sum(n)) # double check ads up  to 690
+
+pfamloadtop <- loadings2  %>%
+  filter(overrep_inLoading != "NA") %>%
+  mutate(Pfam = paste(phylum, family, sep= " "), .before =1)  %>% select(Pfam) %>%
+  unique() %>% pull() # 30
+
+labels <- signasvs  %>% filter(Pfam %in% pfamloadtop )
+
+#labels %>% filter(Pfam %in% pfamloadtop ) %>% summarise( N = sum(n)) # 620 ASVs within the families of the top and tail 2% loading scores
+
+
+pfam <- loadings2  %>%
+  mutate(Pfam = paste(phylum, family, sep= " "), .before =1) %>%
+  filter(overrep_inLoading != "NA" ) %>% # only plot the loading scores within top or tail 2 % - too much niose otherwise
+  group_by(Pfam, overrep_inLoading) %>%
+  summarise(PC1 = sum(PC1)) %>%
+  #filter(overrep_inA == "Captive" & PC1 > 0) # check both go same dir
+  #filter(overrep_inA == "Wild" & PC1 < 0) # check both go same dir
+  ggplot(aes(x = Pfam, y= PC1)) +
+  geom_col(aes(fill = overrep_inLoading), position = "stack") +
+  geom_label(data = labels, aes(label = n, y = ypos)) +
+  scale_fill_manual(values = pal) +
+  coord_flip() +
+  theme(legend.position = "top",
+        axis.title.x = element_text(size=15),
+        axis.text.y = element_text(size=15),
+        axis.text.x = element_text(size=15),
+        strip.text = element_text(size=20),
+        panel.background=element_rect(fill='white', colour='black'),
+        strip.background=element_rect(fill='white', colour='white')) +
+  guides(fill = guide_legend(title = "Overrepresented in", title.position = "left")) +
+  xlab("") +
+  ylab("Loading score")
+
+ggarrange( load + xlab(""),
+           pfam + theme(legend.position = "none"),
+           ncol=1, nrow =2, heights = c( 0.7, 2),
+          labels = c("A", "B"))
+
+```
+
+
+  
+<p>&nbsp;</p>
+
+
+# R and packages
+
+This analysis was run with `r R.version$version.string`. Versions of packages used can be found in
+`r figr('cite-packages', T, type = 'Table')`.
+
+
+```{r cite-packages, cache = FALSE}
+cite_packages(pkgs ="Session", output = "table") %>%
+  kable()
+```
+
+
+
+<p>&nbsp;</p>
+
+# References

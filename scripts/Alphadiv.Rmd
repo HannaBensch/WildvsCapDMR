@@ -1,0 +1,441 @@
+---
+title: "Alpha div Captive vs Wild DMR"
+author: "hanna.bensch@lnu.se"
+date: "`r format(Sys.time(), '%Y-%m-%d')`"
+output:
+   html_document:
+        toc: yes
+        toc_float:
+          collapse: no
+        fig_caption: yes
+        code_folding: hide
+bibliography: 
+    - grateful-refs.bib
+biblio-style: apalike
+link-citations: yes
+---
+
+
+
+```{r libraries, include = FALSE}
+suppressPackageStartupMessages(library(readr))
+suppressPackageStartupMessages(library(dplyr, warn.conflicts = FALSE))
+suppressPackageStartupMessages(library(tidyr))
+suppressPackageStartupMessages(library(purrr))
+suppressPackageStartupMessages(library(stringr))
+suppressPackageStartupMessages(library(ggplot2))
+suppressPackageStartupMessages(library(kfigr))
+suppressPackageStartupMessages(library(knitr))
+suppressPackageStartupMessages(library(breakaway))
+suppressPackageStartupMessages(library(ape))
+suppressPackageStartupMessages(library(grateful))
+suppressPackageStartupMessages(library(wesanderson))
+suppressPackageStartupMessages(library(DT))
+suppressPackageStartupMessages(library(ggpubr))
+suppressPackageStartupMessages(library(forcats))
+suppressPackageStartupMessages(library(ggforce))
+```
+
+
+
+```{r constants}
+```
+
+```{r read-data, echo=FALSE, message=FALSE, warning=FALSE}
+asvs <- read_tsv("../data/asv_table.tsv", col_types = 'ccid')
+
+metadata <- read_delim("../data/metadata.csv", delim = ",", col_types = cols(
+  .default = col_character(),
+  SampleDate = col_date(format = "")
+)) %>% 
+  left_join( # get the nb reads 
+    asvs %>% select(sample, count) %>% 
+    group_by(sample) %>% summarise(NbReads = sum(count), .groups = 'drop'))
+
+taxonomy <- read_tsv("../data/taxonomy.tsv", col_types =  cols(
+  asv = col_character(),
+  kingdom = col_character(),
+  phylum = col_character(),
+  class = col_character(),
+  order = col_character(),
+  family = col_character(),
+  genus = col_character(),
+  species = col_character()
+)) %>%
+  naniar::replace_with_na_all(condition = ~.x %in%
+                                c("uncultured bacterium", "Ambiguous_taxa","uncultured")) # replace all that is "uncultured bacterium", "uncultured"  & Ambiguous_taxa"with NA
+
+# get palettes
+pal <- wes_palette("Darjeeling1")
+pal <- pal[c(2,3)]
+pal <- rev(pal) # change order
+pal2 <- pal
+pal2[2:3] <- c('grey', pal2[c(2,3)])
+
+#create a pseq object
+asvsp <- asvs %>% select(asv, count, sample) %>% 
+  left_join(metadata %>% select(sample, Asample)) %>% select(-sample) %>% # neeed another sample name, sometime problem with sample names starting with numbers only
+  pivot_wider(names_from = 'Asample', values_from='count', values_fil= 0) %>%
+  tibble::column_to_rownames('asv') %>% as.matrix()
+taxonomyp <- taxonomy %>% tibble::column_to_rownames('asv') %>% as.matrix()
+metadatap <- metadata %>% #mutate(Plate_No = as.factor(Plate_No)) 
+            mutate_if(is.character,as.factor) %>% tibble::column_to_rownames('Asample')
+
+pseq <- phyloseq(otu_table(asvsp, taxa_are_rows = TRUE), tax_table(taxonomyp), sample_data(metadatap))
+rm(asvsp, taxonomyp, metadatap)
+```
+
+
+<p>&nbsp;</p>
+
+# Observed Richness
+
+```{r Observed richness, echo=FALSE, fig.cap='**Figure 1.** Observed alpha diversity (richness). Colour by Population.', message=FALSE, warning=FALSE, fig.height=5, fig.width=5}
+observed_c <- sample_richness(pseq)
+observed_c <- summary(observed_c) %>% rename(Asample = sample_names) %>% left_join(metadata %>% select(Asample, Population, Plate_No))
+observed_c %>% 
+  ggplot(aes(x = Population, y = estimate, col = Population)) +
+  geom_violin() +
+  geom_sina() + 
+  geom_violin() +
+  ggforce::geom_sina() +
+  ylab("Observed richness") +
+  xlab("") +
+  scale_colour_manual( values = pal) +
+  scale_colour_manual( values = pal) +
+      theme(axis.title.y = element_text(size =25, face = "bold"),
+        axis.text.y = element_text(size =20),
+        axis.text.x = element_text(size =20),
+        panel.background=element_rect(fill = 'white', colour='black'),
+        strip.background=element_rect(fill = 'white', colour='white'),
+        strip.text = element_text(face = "bold", size=15),
+        panel.grid = element_blank(),
+        legend.position = "none"
+        )  +
+  ylim(0, 700)
+```
+
+
+<p>&nbsp;</p>
+
+
+# Breakaway Richness
+
+```{r breakaway, echo=FALSE, fig.cap='**Figure 2.** Estimated alpha diversity (richness) with confidence interval with breakaway, sorted by estimate. Colour by Population.', message=FALSE, warning=FALSE, fig.height=8, fig.width=8,}
+# Calculate estimated species richness breakaway
+adiv_break <- pseq %>% breakaway()
+adiv_break <- summary(adiv_break) %>% rename(Asample = sample_names) %>% left_join(metadata %>% select(Asample, Population, Plate_No))
+
+adiv_break %>%
+  mutate(Asample = fct_reorder(Asample, estimate)) %>%
+  ggplot(aes(x = Asample, y = estimate,col = Population)) +
+  geom_point() +
+  scale_colour_manual( values = pal) +
+  geom_errorbar(aes(ymin = lower, ymax = upper)) +
+  coord_flip() +
+  xlab('Sample') + 
+  ylab('Estimated richness with confidence interval') +
+  ggtitle("Breakaway richness")
+```
+From `breakaway-vignette`: Don't freak out! Those are wide error bars, but nothing went wrong -- it's just really hard to estimate the true number of unknown species. `breakaway` was developed to deal with this, and to make sure that we account for that uncertainty when we do inference.
+
+
+<p>&nbsp;</p>
+
+
+```{r breakawayviolin, echo=FALSE, fig.cap='**Figure 3.** Estimated alpha diversity (richness) violins. Colour by Population.', message=FALSE, warning=FALSE, fig.height=5, fig.width=4}
+p1 <- adiv_break %>%
+  ggplot(aes(x = Population, y = estimate, col = Population)) +
+  geom_violin() +
+  geom_sina() + 
+  geom_violin() +
+  ggforce::geom_sina() +
+  ylab("ASV richness")+
+  xlab("") +
+  scale_colour_manual( values = pal) +
+      theme(axis.title.y = element_text(size =25, face = "bold"),
+        axis.text.y = element_text(size =20),
+        axis.text.x = element_text(size =20, angle = 45, hjust= 1),
+        plot.title = element_text(size=22, face ="bold"),
+        panel.background=element_rect(fill = 'white', colour='black'),
+        strip.background=element_rect(fill = 'white', colour='white'),
+        strip.text = element_text(face = "bold", size=15),
+        panel.grid = element_blank(),
+        legend.position = "none"
+        )  +
+  ylim(0, 700)
+
+p1
+```
+
+Ok that is very similar to Observed richness!
+
+<p>&nbsp;</p>
+
+
+Test the null-hypothesis that samples from the two populations did not differ in richness: fit a model with Population as fixed effect using the betta() function
+```{r echo=FALSE}
+bt_fixed <- betta(formula = estimate ~ Population, 
+                      ses = error, data = adiv_break)
+bt_fixed$table
+```
+
+Estimated Richness for Wild samples is 131 ASVS less than for Captive, with standard error of 10 of estimate. Suggest there is a large difference between Captive and Wild in Richness.
+
+<p>&nbsp;</p>
+
+Add plate_no as random factor using betta_random()
+```{r echo=FALSE}
+bt_fixed_random <-
+  betta_random(formula = estimate ~ Population | Plate_No, 
+               ses = error,  data = adiv_break)
+bt_fixed_random$table
+# get exact p-value pop
+2 * (1 - pnorm(abs(bt_fixed_random$table["PopulationWild","Estimates"]/
+                     bt_fixed_random$table["PopulationWild","Standard Errors"]))) # still 0
+```
+
+
+Similar result as not using random factor, slightly smaller error and estimate.
+
+<p>&nbsp;</p>
+
+
+`r figr('mean-rich', T, type = 'Table')`. Table of mean and sd richness wild and captive samples.
+```{r mean-rich, echo=FALSE, warning=FALSE, cache=FALSE}
+adiv_break %>% group_by(Population) %>%
+  summarise(meanRich = mean(estimate),
+            sdRich = sd(estimate)) %>%
+  mutate_if(is.numeric, round, digits = 3) %>%
+  kable()
+```
+
+
+<p>&nbsp;</p>
+
+Now we would like to know in what taxa where Number of ASVs differ between wild and captive: 
+
+```{r ASVrichness, fig.cap = '**Figure 4.** Number of ASVs per phylum. Samples are either "Captive" (orange) or "Wild" (green) by color and with boxplot show spread of raw data.', fig.width=12, fig.height = 6, message=FALSE, warning=FALSE, echo = FALSE}
+# caculate top8 phyla with highest prevalence
+top7phyla <- asvs %>% left_join(taxonomy) %>% select(sample, phylum) %>% unique() %>% 
+  group_by(phylum) %>% summarise(Nsamples = n()) %>% arrange(desc(Nsamples)) %>% ungroup() %>%  
+  left_join(
+  asvs %>% filter(!is.na(count)) %>% 
+    inner_join(taxonomy, by = 'asv') %>%
+  group_by(phylum) %>% 
+  summarise(reads = sum(count)) )%>% 
+  top_n(7, Nsamples) %>% 
+  arrange(desc(Nsamples), desc(reads)) %>% mutate(Order  = 1:nrow(.))
+
+# plot the two most common
+p2 <- asvs %>%
+  inner_join(taxonomy, by = 'asv') %>%
+  left_join(top7phyla %>% transmute(phylum, topph = phylum), by = 'phylum') %>%
+  replace_na(list('topph' = 'Other phyla')) %>%
+  group_by(sample, topph) %>%
+  summarise(Nasvs = n()) %>%
+  rename(phylum = topph) %>%
+  ungroup() %>% 
+  complete(sample, nesting(phylum), fill = list(relab = 0)) %>% 
+  left_join(metadata %>% select(sample, Population)) %>%
+  left_join(top7phyla) %>%
+  replace_na(list('Nasvs' = 0)) %>%
+  filter(Order < 3 ) %>%
+  mutate(phylum =  fct_reorder(phylum, Order)) %>%
+  ggplot(aes(x = phylum, y= Nasvs)) +
+  labs(y = "N ASVs", x ="") +
+  geom_boxplot(aes(x = phylum, y= Nasvs, fill=Population),
+               position = position_dodge(width = .7)#, outlier.shape = NA
+               )+
+  scale_fill_manual(values = pal) +
+  theme(legend.position = "none",
+        axis.title.y = element_text(size =25, face = "bold"),
+        axis.text.y = element_text(size =20),
+        axis.text.x = element_text(size =20, angle = 45, hjust = 1),
+        panel.grid = element_blank(),
+        legend.key=element_blank(),
+        plot.title = element_text(size=22, face ="bold"),
+        panel.background=element_rect(fill='white', colour='black'),
+        strip.background=element_rect(fill='white', colour='white')) +
+  guides(alpha =FALSE) 
+
+#plot the less common
+p3 <- asvs %>%
+  inner_join(taxonomy, by = 'asv') %>%
+  left_join(top7phyla %>% transmute(phylum, topph = phylum), by = 'phylum') %>%
+  replace_na(list('topph' = 'Other phyla')) %>%
+  group_by(sample, topph) %>%
+   summarise(Nasvs = n()) %>%
+  rename(phylum = topph) %>%
+  ungroup() %>% 
+  complete(sample, nesting(phylum), fill = list(relab = 0)) %>% 
+  left_join(metadata %>% select(sample, Population)) %>%
+  left_join(top7phyla) %>%
+  replace_na(list('Order' = 11)) %>%
+  filter(Order > 2 ) %>%
+  mutate(phylum =  fct_reorder(phylum, Order)) %>%
+  ggplot(aes(x = phylum, y= Nasvs)) +
+  labs(y = "", x ="") +
+  geom_boxplot(aes(x = phylum, y= Nasvs, fill=Population),
+               position = position_dodge(width = .7) #, 
+               #outlier.shape = NA
+               )+
+  scale_fill_manual(values = pal) +
+  theme(legend.title = element_blank(),
+        legend.position = c(0.8, 0.90),
+        legend.direction = "horizontal",
+        legend.text = element_text(size =20),
+        axis.text.y = element_text(size =20),
+        axis.text.x = element_text(size =20, angle = 45, hjust = 1),
+        panel.grid = element_blank(),
+        legend.key=element_blank(),
+        plot.title = element_text(size=22, face ="bold"),
+        panel.background=element_rect(fill='white', colour='black'),
+        strip.background=element_rect(fill='white', colour='white')) +
+  guides(alpha =FALSE)
+
+#comine to one plot
+p4 <- ggarrange(p2+ ggtitle("A") , p3 +ggtitle("B") , nrow=1, ncol=2, align = "h", widths = c(3,8))
+p4
+```
+
+
+So it looks like *Ruminococcaceae* is the reason for higher diversity within captive samples.
+
+<p>&nbsp;</p>
+
+
+```{r ASVrichnessfamFirmicutes, fig.cap = '**Figure 5.** Number of ASVs within families of Frimicutes. Samples are either "Captive" (orange) or "Wild" (green) by color and with boxplot show spread of raw data. Y-axis on log-10 scale.', fig.width=12, fig.height = 6, message=FALSE, warning=FALSE, echo = FALSE}
+
+# pick out the more diverse families
+firmfam<- asvs %>%
+  inner_join(taxonomy, by = 'asv') %>%
+  filter(phylum == "Firmicutes") %>%
+  group_by(sample, family) %>%
+  summarise(Nasvs = n()) %>%
+  ungroup() %>% 
+  complete(sample, nesting(family), fill = list(relab = 0)) %>% 
+  left_join(metadata %>% select(sample, Population)) %>%
+  replace_na(list('Nasvs' = 0)) %>%
+  group_by(Population, family) %>% 
+  summarise(meanNasvs = mean(Nasvs)) %>% ungroup() %>%
+  filter(meanNasvs > 10) %>% select(family) %>% unique()
+
+asvs %>%
+  inner_join(taxonomy, by = 'asv') %>%
+  filter(phylum == "Firmicutes") %>%
+  group_by(sample, family) %>%
+  summarise(Nasvs = n()) %>%
+  ungroup() %>% 
+  complete(sample, nesting(family), fill = list(relab = 0)) %>% 
+  left_join(metadata %>% select(sample, Population)) %>%
+  filter(family %in% firmfam$family) %>%
+  ggplot(aes(x = family, y= Nasvs)) +
+  labs(y = "N ASVs", x ="") +
+  geom_boxplot(aes(x = family, y= Nasvs, fill=Population),
+               position = position_dodge(width = .7)#, outlier.shape = NA
+               )+
+  scale_fill_manual(values = pal) +
+  theme(legend.position = "none",
+        axis.title.y = element_text(size =25, face = "bold"),
+        axis.text.y = element_text(size =20),
+        axis.text.x = element_text(size =20, angle = 45, hjust = 1),
+        panel.grid = element_blank(),
+        legend.key=element_blank(),
+        plot.title = element_text(size=22, face ="bold"),
+        panel.background=element_rect(fill='white', colour='black'),
+        strip.background=element_rect(fill='white', colour='white')) +
+  guides(alpha =FALSE)
+```
+
+
+Not a very pretty plot, but we see that richness within *Ruminococcaceae* is much higher for captive than wild.
+
+<p>&nbsp;</p>
+
+```{r ASVrichnesscombined, fig.cap = '**Figure 6.** combined bplot for manuscript. A) ASV rrichness and B) Number of ASVs per phylum. Samples are either "Captive" (orange) or "Wild" (green) by color and with boxplot show spread of raw data.', fig.width=12, fig.height = 6, message=FALSE, warning=FALSE, echo = FALSE}
+p5 <- ggarrange(p1 +ggtitle("A"), p2+ ggtitle("B"), p3 +ggtitle("C") , nrow=1, ncol=3, align = "h", widths = c(1,1,3))
+p5
+```
+
+
+<p>&nbsp;</p>
+
+`r figr('wilcoxNasvsP', T, type = 'Table')`. Table results wilcox test ASV richness of phyla.
+```{r wilcoxNasvsP, echo=FALSE, message=FALSE, warning=FALSE}
+# test N ASVS 
+Pdata <- asvs %>%
+  inner_join(taxonomy, by = 'asv') %>%
+  left_join(top7phyla %>% transmute(phylum, topph = phylum), by = 'phylum') %>%
+  replace_na(list('topph' = 'Other_phyla')) %>%
+  group_by(sample, topph) %>%
+  summarise(Nasvs = n()) %>%
+  rename(phylum = topph) %>%
+  ungroup() %>% 
+  complete(sample, nesting(phylum), fill = list(Nasvs = 0)) %>% 
+  #pivot_wider(names_from = 'phylum', values_from='Nasvs', values_fill= 0) %>%
+  left_join(metadata %>% select(sample, Population))
+
+vars = names(Pdata)[c(2:8)]
+
+
+models <- Pdata  %>%
+  split(.$phylum) %>% 
+  map( ~ wilcox.test(Nasvs ~ Population, data = ., ) %>%  broom::tidy()) %>%
+  bind_rows(.id = "phylum") %>%
+  arrange(p.value) %>% 
+  mutate(across(is.numeric, ~ round(., 6)),
+         p.adjust = p.adjust(p.value, method="bonferroni")) # Bonferroni correction for that we did tests on 17 family groups 
+
+tableNasvsP <- Pdata %>%
+  group_by(phylum, Population) %>%
+  summarise(meanNasvs = mean(Nasvs),
+            sdNAsvs = sd(Nasvs)) %>% ungroup() %>%
+  pivot_wider(names_from = "Population", values_from = c("meanNasvs", "sdNAsvs")) %>%
+  mutate_if(is.numeric,
+                     round,
+                     digits = 1) %>%
+  left_join(
+models  %>%
+  select(phylum, p.value, p.adjust) %>%
+  mutate_if(is.numeric,
+                     round,
+                     digits = 3) %>%
+  mutate(p.value = as.character(p.value),
+  p.value = case_when(p.value == 0 ~ "<0.001",
+                      is.na(p.value) ~ "", 
+                      TRUE ~ p.value),
+  p.adjust = as.character(p.adjust),
+  p.adjust = case_when(p.adjust == "0" ~ "<0.001",
+                       TRUE ~ p.adjust)) 
+) %>%
+  left_join(top7phyla %>% select(phylum, Order)) %>% 
+  arrange(Order) %>% 
+  select(-Order)
+
+# write
+#tableNasvsP %>%
+#  write.table("../tables/NasvsPhylymWilcox.txt")
+
+
+tableNasvsP %>% kable()
+
+```
+
+
+<p>&nbsp;</p>
+ 
+# R and packages
+
+
+This analysis was run with `r R.version$version.string`. Versions of packages used can be found in `r figr('cite-packages', T, type = 'Table')`.
+
+```{r cite-packages, echo=FALSE, warning=FALSE, cache=FALSE}
+cite_packages(pkgs ="Session", output = "table") %>%
+  kable()
+```
+
+
+<p>&nbsp;</p>
+
+# References

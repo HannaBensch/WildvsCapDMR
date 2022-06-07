@@ -1,0 +1,624 @@
+---
+title: "Relative abundances DMR Wild vs Captive"
+author: "hanna.bensch@lnu.se"
+date: "`r format(Sys.time(), '%Y-%m-%d')`"
+output:
+   html_document:
+        toc: yes
+        toc_float:
+          collapse: no
+        fig_caption: yes
+        code_folding: hide
+bibliography: 
+    - grateful-refs.bib
+biblio-style: apalike
+link-citations: yes
+---
+
+
+```{r libraries, include = FALSE}
+suppressPackageStartupMessages(library(readr))
+suppressPackageStartupMessages(library(dplyr, warn.conflicts = FALSE))
+suppressPackageStartupMessages(library(tidyr))
+suppressPackageStartupMessages(library(purrr))
+suppressPackageStartupMessages(library(stringr))
+suppressPackageStartupMessages(library(ggplot2))
+suppressPackageStartupMessages(library(kfigr))
+suppressPackageStartupMessages(library(knitr))
+suppressPackageStartupMessages(library(vegan))
+suppressPackageStartupMessages(library(ggpubr))
+suppressPackageStartupMessages(library(forcats))
+suppressPackageStartupMessages(library(wesanderson))
+suppressPackageStartupMessages(library(grateful))
+suppressPackageStartupMessages(library(lme4))
+suppressPackageStartupMessages(library(sjPlot))
+```
+
+```{r constants}
+```
+
+```{r read-data, echo=FALSE, message=FALSE, warning=FALSE}
+asvs <- read_tsv("../data/asv_table.tsv", col_types = 'ccid')
+
+metadata <- read_delim("../data/metadata.csv", delim = ",", col_types = cols(
+  .default = col_character(),
+  SampleDate = col_date(format = ""),
+  massindex = col_double()
+)) %>% 
+  left_join( # get the nb reads 
+    asvs %>% select(sample, count) %>% 
+    group_by(sample) %>% summarise(NbReads = sum(count), .groups = 'drop'))
+
+taxonomy <- read_tsv("../data/taxonomy.tsv", col_types =  cols(
+  asv = col_character(),
+  kingdom = col_character(),
+  phylum = col_character(),
+  class = col_character(),
+  order = col_character(),
+  family = col_character(),
+  genus = col_character(),
+  species = col_character()
+))  %>%
+  naniar::replace_with_na_all(condition = ~.x %in%
+                                c("uncultured bacterium", "Ambiguous_taxa", "uncultured")) # replace with NA as unassigned
+
+# get palette
+pal <- wes_palette("Darjeeling1")
+pal <- pal[c(2,3)]
+pal <- rev(pal) # change order
+
+```
+
+# Introduction
+
+In this study, we are comparing fecal samples from captive individuals with wild caught animals. 
+
+<p>&nbsp;</p>
+
+
+# Results
+
+
+`r figr('unassigned_taxa', T, type = 'Table')`. Table of assigned taxa of ASVs in wild and captive samples.
+
+```{r assigned_taxa, echo=FALSE, message=FALSE}
+assign_taxa <- data.frame(Population=character(),kingdom = double(),
+                   phylum = double(), class = double(), 
+                   order = double(), family = double(), 
+                   genus = double(), species = double())
+#asvs %>% left_join(taxonomy) %>% 
+#  select(asv, kingdom) %>% unique() %>% filter(!is.na(kingdom)) %>%  summarise(n = n()) %>% pull() # all assigned to kingdom
+
+# phylum
+c_phyl <- asvs %>% left_join(taxonomy) %>% left_join(metadata %>% select(sample, Population)) %>% filter( Population == "Captive") %>%
+  select(asv, phylum) %>% unique() %>% filter(!is.na(phylum)) %>%  summarise(n = n()) %>% pull() /
+  asvs %>% left_join(taxonomy) %>% left_join(metadata %>% select(sample, Population)) %>% filter( Population == "Captive") %>%
+  select(asv, phylum) %>% unique()  %>%  summarise(n = n()) %>% pull() 
+w_phyl <- asvs %>% left_join(taxonomy) %>% left_join(metadata %>% select(sample, Population)) %>% filter( Population == "Wild") %>%
+  select(asv, phylum) %>% unique() %>% filter(!is.na(phylum)) %>%  summarise(n = n()) %>% pull()/
+  asvs %>% left_join(taxonomy) %>% left_join(metadata %>% select(sample, Population)) %>% filter( Population == "Wild") %>%
+  select(asv, phylum) %>% unique()  %>%  summarise(n = n()) %>% pull()
+
+# class
+c_class <- asvs %>% left_join(taxonomy) %>% left_join(metadata %>% select(sample, Population)) %>% filter( Population == "Captive") %>%
+  select(asv, class) %>% unique() %>% filter(!is.na(class)) %>%  summarise(n = n()) %>% pull() /
+   asvs %>% left_join(taxonomy) %>% left_join(metadata %>% select(sample, Population)) %>% filter( Population == "Captive") %>%
+  select(asv, class) %>% unique()  %>%  summarise(n = n()) %>% pull() 
+w_class <- asvs %>% left_join(taxonomy) %>% left_join(metadata %>% select(sample, Population)) %>% filter( Population == "Wild") %>%
+  select(asv, class) %>% unique() %>% filter(!is.na(class)) %>%  summarise(n = n()) %>% pull() /
+  asvs %>% left_join(taxonomy) %>% left_join(metadata %>% select(sample, Population)) %>% filter( Population == "Wild") %>%
+  select(asv, class) %>% unique() %>%  summarise(n = n()) %>% pull()
+
+# order
+c_ord <- asvs %>% left_join(taxonomy) %>% left_join(metadata %>% select(sample, Population)) %>% filter( Population == "Captive") %>%
+  select(asv, order) %>% unique() %>% filter(!is.na(order)) %>%  summarise(n = n()) %>% pull() / 
+   asvs %>% left_join(taxonomy) %>% left_join(metadata %>% select(sample, Population)) %>% filter( Population == "Captive") %>%
+  select(asv, order) %>% unique() %>%  summarise(n = n()) %>% pull()
+w_ord <- asvs %>% left_join(taxonomy) %>% left_join(metadata %>% select(sample, Population)) %>% filter( Population == "Wild") %>%
+  select(asv, order) %>% unique() %>% filter(!is.na(order)) %>%  summarise(n = n()) %>% pull()/
+  asvs %>% left_join(taxonomy) %>% left_join(metadata %>% select(sample, Population)) %>% filter( Population == "Wild") %>%
+  select(asv, order) %>% unique() %>%  summarise(n = n()) %>% pull()
+
+# family
+c_fam <- asvs %>% left_join(taxonomy) %>% left_join(metadata %>% select(sample, Population)) %>% filter( Population == "Captive") %>%
+  select(asv, family) %>% unique() %>% filter(!is.na(family)) %>%  summarise(n = n()) %>% pull() / 
+  asvs %>% left_join(taxonomy) %>% left_join(metadata %>% select(sample, Population)) %>% filter( Population == "Captive") %>%
+  select(asv, family) %>% unique()  %>%  summarise(n = n()) %>% pull() 
+w_fam <- asvs %>% left_join(taxonomy) %>% left_join(metadata %>% select(sample, Population)) %>% filter( Population == "Wild") %>%
+  select(asv, family) %>% unique() %>% filter(!is.na(family)) %>%  summarise(n = n()) %>% pull() / 
+  asvs %>% left_join(taxonomy) %>% left_join(metadata %>% select(sample, Population)) %>% filter( Population == "Wild") %>%
+  select(asv, family) %>% unique() %>% summarise(n = n()) %>% pull()
+
+# genus
+c_gen <- asvs %>% left_join(taxonomy) %>% left_join(metadata %>% select(sample, Population)) %>% filter( Population == "Captive") %>%
+  select(asv, genus) %>% unique() %>% filter(!is.na(genus)) %>%  summarise(n = n()) %>% pull() /
+  asvs %>% left_join(taxonomy) %>% left_join(metadata %>% select(sample, Population)) %>% filter( Population == "Captive") %>%
+  select(asv, genus) %>% unique() %>%  summarise(n = n()) %>% pull()
+w_gen <- asvs %>% left_join(taxonomy) %>% left_join(metadata %>% select(sample, Population)) %>% filter( Population == "Wild") %>%
+  select(asv, genus) %>% unique() %>% filter(!is.na(genus)) %>%  summarise(n = n()) %>% pull()  / 
+  asvs %>% left_join(taxonomy) %>% left_join(metadata %>% select(sample, Population)) %>% filter( Population == "Wild") %>%
+  select(asv, genus) %>% unique() %>%  summarise(n = n()) %>% pull() 
+
+# species
+c_sp <- asvs %>% left_join(taxonomy) %>% left_join(metadata %>% select(sample, Population)) %>% filter( Population == "Captive") %>%
+  select(asv, species) %>% unique() %>% filter(!is.na(species)) %>%  summarise(n = n()) %>% pull() / 
+  asvs %>% left_join(taxonomy) %>% left_join(metadata %>% select(sample, Population)) %>% filter( Population == "Captive") %>%
+  select(asv, genus) %>% unique() %>%  summarise(n = n()) %>% pull() 
+w_sp <- asvs %>% left_join(taxonomy) %>% left_join(metadata %>% select(sample, Population)) %>% filter( Population == "Wild") %>%
+  select(asv, species) %>% unique() %>% filter(!is.na(species)) %>%  summarise(n = n()) %>% pull()  /
+  asvs %>% left_join(taxonomy) %>% left_join(metadata %>% select(sample, Population)) %>% filter( Population == "Wild") %>%
+  select(asv, genus) %>% unique() %>%  summarise(n = n()) %>% pull()
+
+dt <- assign_taxa %>% 
+  #add_row(Population = "Full dataset", kingdom = 0,
+  #        phylum = a_phyl, class = a_class, order = a_ord,
+  #        family = a_fam, genus = a_gen, species = a_sp) %>%
+  add_row(Population = "Captive", kingdom = 0,
+          phylum = c_phyl, class = c_class, order = c_ord,
+          family = c_fam, genus = c_gen, species = c_sp) %>%
+  add_row(Population = "Wild", kingdom = 0,
+          phylum = w_phyl, class = w_class, order = w_ord,
+          family = w_fam, genus = w_gen, species = w_sp) %>% 
+  mutate( kingdom = scales::percent(kingdom),
+          phylum = scales::percent(phylum),
+          class = scales::percent(class),
+         order = scales::percent(order),
+          family = scales::percent(family),
+          genus = scales::percent(genus),
+          species = scales::percent(species)) %>%
+  rename(domain = kingdom)
+dt %>% kable()
+
+# write table
+#dt %>% write.table(file ="../tables/unassignedtaxa.txt", row.names = F)
+
+rm(c_class, c_fam, c_gen, c_ord, c_phyl, c_sp, w_class, w_fam, w_gen, w_ord, w_phyl, w_sp,assign_taxa, dt)
+```
+
+
+```{r rename_unassigned_taxa, echo=FALSE, message=FALSE}
+# rename unclassified
+taxonomy  <- taxonomy %>%
+  mutate(
+    phylum = ifelse(is.na(phylum), sprintf("%s unclassified", kingdom), phylum),
+    class = ifelse(is.na(class), sprintf("%s unclassified", str_remove(phylum, "unclassified")), class),
+    order = ifelse(is.na(order), sprintf("%s unclassified", str_remove(class, "unclassified")), order),
+    family = ifelse(is.na(family), sprintf("%s unclassified", str_remove(order, "unclassified")), family),
+    genus = ifelse(is.na(genus), sprintf("%s unclassified", str_remove(family, "unclassified")), genus),
+    species = ifelse(is.na(species), sprintf("%s unclassified", str_remove(genus, "unclassified")), species))
+
+```
+
+
+<p>&nbsp;</p>
+
+
+
+### Compare relative abundance phylum level
+
+
+```{r TaxonomyplotWildvsCapt, echo=FALSE, fig.cap='**Figure 1a.** Taxonomyplot top 8 phyla faeces samples.Samples are either "Captive" (Mole-rat lab) or "Wild" (Kuruman River Reserve population)', fig.height=8, fig.width=12, message=FALSE, cache=FALSE}
+# caculate top8 phyla with highest prevalence
+top7phyla <- asvs %>% left_join(taxonomy) %>% select(sample, phylum) %>% unique() %>% 
+  group_by(phylum) %>% summarise(Nsamples = n()) %>% arrange(desc(Nsamples)) %>% ungroup() %>%  
+  left_join(
+  asvs %>% filter(!is.na(count)) %>% 
+    inner_join(taxonomy, by = 'asv') %>%
+  group_by(phylum) %>% 
+  summarise(reads = sum(count)) )%>% 
+  top_n(7, Nsamples) %>% 
+  arrange(desc(Nsamples), desc(reads)) %>% mutate(Order  = 1:nrow(.))
+
+# caculate top10 class
+top10class <- asvs %>% 
+  left_join(taxonomy) %>% select(sample, phylum, class) %>% unique() %>% 
+  group_by(phylum, class) %>% summarise(Nsamples = n()) %>% arrange(desc(Nsamples)) %>% ungroup() %>%  
+  left_join(
+  asvs %>% filter(!is.na(count)) %>% 
+    inner_join(taxonomy, by = 'asv') %>%
+  group_by(class) %>% 
+  summarise(reads = sum(count)) )%>% 
+  top_n(10, Nsamples) %>% 
+  arrange(desc(Nsamples), desc(reads)) %>% mutate(Order  = 1:nrow(.))
+
+ggarrange(
+  asvs %>%
+  inner_join(taxonomy, by = 'asv') %>%
+  left_join(top7phyla %>% transmute(phylum, topph = phylum), by = 'phylum') %>%
+  group_by(topph, sample) %>%
+  replace_na(list('topph' = 'Other phyla')) %>%
+  summarise(relab = sum(relab)) %>%
+  left_join(metadata %>% select(sample, Population)) %>%
+  ggplot(aes(x = sample, y = relab, fill = topph)) +
+  labs(y = "Relative abundance") +
+  geom_col(position = 'fill') +
+  labs(fill = "Phylum") + 
+  facet_grid(cols = vars(Population),  scales="free") +
+  theme(axis.title.x=element_blank(),
+        axis.text.x=element_blank(),
+        axis.ticks.x =element_blank(),
+        axis.line.x=element_blank()),
+  asvs %>% 
+  inner_join(taxonomy, by = 'asv') %>%
+  left_join(top10class %>% transmute(class, topph = class), by = 'class') %>%
+  group_by(topph, sample) %>%
+  replace_na(list('topph' = 'Other Classes')) %>%
+  summarise(relab = sum(relab)) %>%
+  left_join(metadata %>% select(sample, Population)) %>%
+  ggplot(aes(x = sample, y = relab, fill = topph)) +
+  labs(y = "Relative abundance") +
+  geom_col(position = 'fill') +
+  labs(fill = "Class") + 
+  facet_grid(cols = vars(Population),  scales="free") +
+  theme(axis.title.x=element_blank(),
+        axis.text.x=element_blank(),
+        axis.ticks.x =element_blank(),
+        axis.line.x=element_blank()),
+  labels = c("A", "B"),
+          ncol = 1, nrow = 2)
+
+```
+
+
+<p>&nbsp;</p>
+
+
+`r figr('unassigned_taxa', T, type = 'Table')`. Number of reads  and sample of all phylum within dataset.
+```{r table1phyl, echo=FALSE, message=FALSE, warnings=FALSE, echo = FALSE}
+phylatable <- asvs %>% left_join(taxonomy) %>% select(sample, phylum) %>% unique() %>% 
+  group_by(phylum) %>% summarise(Nsamples = n()) %>% arrange(desc(Nsamples)) %>% ungroup() %>%  
+  left_join(
+  asvs %>% left_join(metadata %>% select(sample, Population)) %>% left_join(taxonomy) %>% select(sample,Population, phylum) %>% unique() %>% 
+  group_by(phylum, Population) %>% 
+  summarise(Nsamples = n()) %>% pivot_wider(names_from = Population, values_from = Nsamples)) %>%
+  rename(NsamplesWild = Wild,  NsamplesCaptive = Captive) %>%
+  left_join(
+  asvs %>% filter(!is.na(count)) %>% left_join(metadata %>% select(sample, Population)) %>%
+    inner_join(taxonomy, by = 'asv') %>%
+  group_by(phylum, Population) %>% 
+  summarise(reads = sum(count)) %>% pivot_wider(names_from = Population, values_from = reads) %>%
+  rename(ReadsWild = Wild, ReadsCaptive = Captive)) %>%
+  left_join(
+  asvs %>% filter(!is.na(count)) %>% 
+    inner_join(taxonomy, by = 'asv') %>%
+  group_by(sample, phylum) %>%
+    summarise(count = sum(count),
+              relab = sum(relab) )%>%
+    group_by(phylum) %>%
+  summarise(reads = sum(count),
+            meanrelab = mean(relab),
+            maxrelab = max(relab),
+            minrelab = min(relab),
+            sdrelab = sd(relab) ) 
+  ) %>%  arrange(desc(Nsamples))
+
+phylatable %>% kable(digits = 4)
+```
+
+
+
+<p>&nbsp;</p>
+
+
+
+```{r relabsbox2, fig.cap = '**Figure 2.** Relative abundances of most phylum with 100 % prevalence. Samples are either "Captive" (orange) or "Wild" (green) by color and with boxplot show spread of raw data.', fig.width=12, fig.height = 6, message=FALSE, warning=FALSE, echo = FALSE}
+plot2 <-asvs %>%
+  inner_join(taxonomy, by = 'asv') %>%
+  left_join(top7phyla %>% transmute(phylum, topph = phylum), by = 'phylum') %>%
+  replace_na(list('topph' = 'Other phyla')) %>%
+  group_by(sample, topph) %>%
+  summarise(relab = sum(relab)) %>%
+  rename(phylum = topph) %>%
+  ungroup() %>% 
+  complete(sample, nesting(phylum), fill = list(relab = 0)) %>% 
+  left_join(metadata %>% select(sample, Population)) %>%
+  left_join(top7phyla) %>%
+  replace_na(list('meanrelab' = 0)) %>%
+  filter(Order < 3 ) %>%
+  mutate(phylum =  fct_reorder(phylum, Order)) %>%
+  ggplot(aes(x = phylum, y= relab)) +
+  labs(y = "Relative Abundance", x ="") +
+  geom_boxplot(aes(x = phylum, y= relab, fill=Population),
+               position = position_dodge(width = .7)#, outlier.shape = NA
+               )+
+  scale_fill_manual(values = pal) +
+  theme(legend.position = "none",
+        axis.title.y = element_text(size =25, face = "bold"),
+        axis.text.y = element_text(size =20),
+        axis.text.x = element_text(size =20, angle = 45, hjust = 1),
+        panel.grid = element_blank(),
+        legend.key=element_blank(),
+        plot.title = element_text(size=22, face ="bold"),
+        panel.background=element_rect(fill='white', colour='black'),
+        strip.background=element_rect(fill='white', colour='white')) +
+  ylim(0, 0.9) +
+  guides(alpha =FALSE) + ggtitle("A")
+
+plot1 <- asvs %>%
+  inner_join(taxonomy, by = 'asv') %>%
+  left_join(top7phyla %>% transmute(phylum, topph = phylum), by = 'phylum') %>%
+  replace_na(list('topph' = 'Other phyla')) %>%
+  group_by(sample, topph) %>%
+  summarise(relab = sum(relab)) %>%
+  rename(phylum = topph) %>%
+  ungroup() %>% 
+  complete(sample, nesting(phylum), fill = list(relab = 0)) %>% 
+  left_join(metadata %>% select(sample, Population)) %>%
+  left_join(top7phyla) %>%
+  replace_na(list('Order' = 11)) %>%
+  filter(Order > 2 ) %>%
+  mutate(phylum =  fct_reorder(phylum, Order)) %>%
+  ggplot(aes(x = phylum, y= relab)) +
+  labs(y = "", x ="") +
+  ggtitle("B")+
+  geom_boxplot(aes(x = phylum, y= relab, fill=Population),
+               position = position_dodge(width = .7) #, 
+               #outlier.shape = NA
+               )+
+  scale_fill_manual(values = pal) +
+  theme(legend.title = element_blank(),
+        legend.position = c(0.8, 0.90),
+        legend.direction = "horizontal",
+        legend.text = element_text(size =20),
+        axis.text.y = element_text(size =20),
+        axis.text.x = element_text(size =20, angle = 45, hjust = 1),
+        panel.grid = element_blank(),
+        legend.key=element_blank(),
+        plot.title = element_text(size=22, face ="bold"),
+        panel.background=element_rect(fill='white', colour='black'),
+        strip.background=element_rect(fill='white', colour='white')) +
+  ylim(0, 0.15) +
+  guides(alpha =FALSE)
+ggarrange(plot2 , plot1, nrow=1, ncol=2, align = "h", widths = c(3,8))
+```
+
+
+<p>&nbsp;</p>
+
+
+
+```{r relabsboxALL, echo=FALSE, fig.cap='**Figure 3.** Relative abundances of A) two most abundant phylum,  B) next 6 most common phyla (100 % prevalence) and C) Rest of all phyla ("Other" in fig B), of low relative abundance** Samples are either "Captive" (orange) or "Wild" (green) by colour and with boxplot show spread of raw data. Note the log scale relative abundance in plot C as these phyla in general had very low relative abundance.', fig.height=12, fig.width=12, warning=FALSE, message=FALSE}
+
+plot3 <- asvs %>%
+  inner_join(taxonomy, by = 'asv') %>%
+  group_by(sample, phylum) %>%
+  summarise(relab = sum(relab)) %>%
+  ungroup() %>% 
+  complete(sample, nesting(phylum), fill = list(relab = 0)) %>% 
+  left_join(metadata %>% select(sample, Population)) %>%
+  left_join(top7phyla) %>%
+  filter(is.na(Nsamples)) %>% # get phyla not in top 8
+  ggplot(aes(x = phylum, y= relab)) +
+  labs(y = "Log Relative Abundance", x ="") +
+  ggtitle("C") +
+  geom_boxplot(aes(x = phylum, y= log(relab), fill=Population),
+               position = position_dodge(width = .7) )+
+  scale_fill_manual(values = pal) +
+  theme(axis.title.y = element_text(size =20, face = "bold"),
+        legend.position = "none",
+        axis.text.y = element_text(size =20),
+        axis.text.x = element_text(size =20, angle = 45, hjust = 1),
+        panel.grid = element_blank(),
+        legend.key=element_blank(),
+        plot.title = element_text(size=22, face ="bold"),
+        panel.background=element_rect(fill='white', colour='black'),
+        strip.background=element_rect(fill='white', colour='white')) +
+  guides(alpha =FALSE)
+
+ggarrange(ggarrange(plot2 , plot1,nrow=1, ncol=2, align = "h", widths = c(3,8)), plot3, nrow=2, ncol=1)
+```
+
+
+<p>&nbsp;</p>
+
+
+
+### Compare relative abundance family level
+
+```{r relabsboxplotfam, fig.width=10, fig.height = 8, fig.cap = '**Figure 4.** Relative abundances of the 12 families with highest prevalence (all samples).Samples are either "Captive" (orange) or "Wild" (green) by color and with boxplot show spread of raw data.', message=FALSE, warning=FALSE, echo = FALSE}
+
+# caculate top10 class
+top10fam <- asvs %>% 
+  left_join(taxonomy) %>% select(sample, phylum, family) %>% unique() %>% 
+  group_by(phylum, family) %>% summarise(Nsamples = n()) %>% arrange(desc(Nsamples)) %>% ungroup() %>%  
+  left_join(
+  asvs %>% filter(!is.na(count)) %>% 
+    inner_join(taxonomy, by = 'asv') %>%
+  group_by(phylum, family) %>% 
+  summarise(reads = sum(count)) )%>% 
+  filter(Nsamples == 109) %>%
+  arrange(desc(reads)) %>% mutate(Order  = 1:nrow(.))
+
+asvs %>%
+  inner_join(taxonomy, by = 'asv') %>%
+  left_join(top10fam %>% transmute(family, toppf = family), by = 'family') %>%
+  filter(!is.na(toppf)) %>%
+  group_by(sample, toppf) %>%
+  summarise(relab = sum(relab)) %>%
+  rename(family = toppf) %>%
+  ungroup() %>% 
+  complete(sample, nesting(family), fill = list(relab = 0)) %>% 
+  left_join(metadata %>% select(sample, Population)) %>%
+  left_join(top10fam) %>%
+  mutate(familyp = paste(phylum, family)) %>%
+  arrange(phylum) %>%
+  ggplot(aes(x = familyp, y= relab)) +
+  labs(y = " log Relative abundance", x ="") +
+  geom_boxplot(aes(x = familyp, y= log(relab), fill=Population),
+               position = position_dodge(width = .7))+
+  #geom_point(aes(x = phylum, y= relab, col = Population, group = Population, alpha =0.1), position = position_dodge(width = .5)) +
+  scale_fill_manual(values = pal) +
+  theme(axis.title = element_text(size = 20, face = "bold"),
+        legend.title = element_blank(),
+        legend.position = "top",
+        legend.direction = "horizontal",
+        legend.text = element_text(size =20),
+        axis.text.y = element_text(size =15),
+        axis.text.x = element_text(size =15),
+        panel.background=element_rect(fill='white', colour='black'),
+        strip.background=element_rect(fill='white', colour='white'),
+        panel.grid = element_blank(),
+        legend.key=element_blank()) +
+  coord_flip()+
+  guides(alpha =FALSE)
+
+```
+
+
+<p>&nbsp;</p>
+
+
+`r figr('tablefam', T, type = 'Table')`  **%  of reads of the top families with 100% prevalence of the reads of the phylum.**
+```{r tablefam, echo=FALSE, message=FALSE, warnings=FALSE, echo = FALSE}
+table <- asvs %>% 
+  left_join(taxonomy) %>% select(sample, phylum, family) %>% unique() %>% 
+  group_by(phylum, family) %>% summarise(Nsamples = n()) %>% arrange(desc(Nsamples)) %>% ungroup() %>%  
+  left_join(
+  asvs %>% filter(!is.na(count)) %>% 
+    inner_join(taxonomy, by = 'asv') %>%
+  group_by(phylum, family) %>% 
+  summarise(reads = sum(count)) )%>% 
+  arrange(desc(reads))%>% 
+  left_join(
+  asvs %>% filter(!is.na(count)) %>% 
+    left_join(taxonomy, by = 'asv') %>%
+    group_by(phylum) %>% 
+    summarise(readsP = sum(count))
+  ) %>%
+  mutate(perc_readsP = reads/readsP)
+
+table$perc_readsP <- formattable::percent(table$perc_readsP, digits = 0) 
+table %>% na_if( 0) %>% select(-readsP) %>% kable()
+```
+
+<p>&nbsp;</p>
+
+
+## F/B-ratio
+
+
+```{r FBratiomasindex, fig.cap='**Figure 5.** A) Firmicutes Bacteriodetes ratio and B) BMI of wild and captive animals.', fig.height=4, fig.width=12, message=FALSE, warning=FALSE,  echo=FALSE}
+ggarrange(
+asvs %>%
+  inner_join(taxonomy %>% select(asv, phylum), by = 'asv') %>%
+  filter(phylum %in% c("Bacteroidetes", "Firmicutes")) %>%
+  group_by(sample, phylum) %>%
+  summarise(relab = sum(relab)) %>%
+  ungroup() %>% 
+  pivot_wider(names_from = phylum, values_from = relab) %>%
+  mutate(FBratio = Firmicutes/ Bacteroidetes) %>%
+  left_join(metadata %>% select(sample, Population, massindex)) %>%
+  ggplot(aes(x = Population, y=  FBratio)) +
+  geom_boxplot(aes(fill = Population)) +
+  scale_fill_manual(values = pal) +
+  ylab("F/B-ratio") +
+  ylim(0,6) +
+  ggtitle("A") +
+  theme(axis.title.y = element_text(size = 20, face = "bold"),
+        axis.title.x = element_blank(),
+        legend.title = element_blank(),
+        legend.text = element_text(size =20),
+        axis.text.y = element_text(size =15),
+        axis.text.x = element_text(size =15),
+        plot.title = element_text(size=22, face ="bold"),
+        panel.background=element_rect(fill='white', colour='black'),
+        strip.background=element_rect(fill='white', colour='white'),
+        panel.grid = element_blank(),
+        legend.key=element_blank()),
+metadata %>%
+  ggplot(aes(x = Population, y=  massindex)) +
+  geom_boxplot(aes(fill = Population)) +
+  scale_fill_manual(values = pal) +
+  ggtitle("B") +
+  ylab("Body mass index") +
+  theme(axis.title.y = element_text(size = 20, face = "bold"),
+        axis.title.x = element_blank(),
+        legend.title = element_blank(),
+        legend.text = element_text(size =20),
+        axis.text.y = element_text(size =15),
+        axis.text.x = element_text(size =15),
+        plot.title = element_text(size=22, face ="bold"),
+        panel.background=element_rect(fill='white', colour='black'),
+        strip.background=element_rect(fill='white', colour='white'),
+        panel.grid = element_blank(),
+        legend.key=element_blank()), common.legend = TRUE, ncol = 2)
+```
+Note: One outlier F/B from wild removed for visualization. F/B ratio One captive animal had no tooth width and therefore missing data on body mass index.
+
+
+<p>&nbsp;</p>
+
+
+
+`r figr('FBratiolmer', T, type = 'Table')`. LMM F/B-ratio table results.
+```{r FBratiolmer, echo=FALSE, message=FALSE, warning=FALSE}
+fb_data <- asvs %>%
+  inner_join(taxonomy %>% select(asv, phylum), by = 'asv') %>%
+  filter(phylum %in% c("Bacteroidetes", "Firmicutes")) %>%
+  group_by(sample, phylum) %>%
+  summarise(relab = sum(relab)) %>%
+  ungroup() %>% 
+  pivot_wider(names_from = phylum, values_from = relab) %>%
+  mutate(FBratio = (Firmicutes/Bacteroidetes)) %>%
+  left_join(metadata %>% select(sample, Population, Plate_No, NbReads))
+
+mcheck<-function(obj,...){
+  rs<-resid(obj)
+  fv<-fitted(obj)
+  par(mfrow=c(1,3))
+  plot(fv,rs,xlab="FITTED VALUES",ylab="RESIDUALS")
+  abline(h=0,lty=2,lwd=2)
+  qqnorm(rs,xlab="NORMAL SCORES",ylab="ORDERED RESIDUALS",main="")
+  qqline(rs,lty=2,lwd=2)
+  hist(resid(obj),xlab="RESIDUALS",ylab="FREQUENCY",main="")
+  par(mfrow=c(1,1))
+  invisible(NULL)
+}
+
+# mead and sd per pop
+#fb_data %>% group_by(Population) %>% summarise(mean = mean(FBratio),
+#                                               sd = sd(FBratio) )
+  
+# FB ratio
+m1 <- lmer(log(FBratio) ~ Population + (1|Plate_No), data = fb_data )
+#summary(m1)
+tab_model(m1, show.ci = 0.95, show.se = 0.95)
+#tab_model(m1, show.ci = 0.95, show.se = 0.95, file = "../tables/FBratio.doc")
+#mcheck(m1)
+```
+
+
+<p>&nbsp;</p>
+
+
+## Body mass index
+
+`r figr('massindexlm', T, type = 'Table')`. Lm body mass index table results. 
+```{r massindexlm, echo=FALSE, message=FALSE, warning=FALSE}
+# BMI
+m2 <- lm(log(massindex) ~ Population, data = metadata %>% filter(!is.na(massindex))) # one captive without without
+#summary(m2)
+tab_model(m2, show.ci = 0.95, show.se = 0.95)
+#mcheck(m2)
+#tab_model(m2, show.ci = 0.95, show.se = 0.95, file = "../tables/massindex.doc")
+```
+
+<p>&nbsp;</p>
+
+
+# R and packages
+
+This analysis was run with `r R.version$version.string`. Versions of packages used can be found in
+`r figr('cite-packages', T, type = 'Table')`.
+
+
+```{r cite-packages, cache = FALSE}
+cite_packages(pkgs ="Session", output = "table") %>%
+  kable()
+```
+
+
+
+<p>&nbsp;</p>
+
+# References

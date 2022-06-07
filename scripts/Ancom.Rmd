@@ -1,0 +1,194 @@
+---
+title: "ANCOMBC Wild vs Captive "
+author: "hanna.bensch@lnu.se"
+date: "`r format(Sys.time(), '%Y-%m-%d')`"
+output:
+   html_document:
+        toc: yes
+        toc_float:
+          collapse: no
+        fig_caption: yes
+        code_folding: hide
+bibliography: 
+    - grateful-refs.bib
+biblio-style: apalike
+link-citations: yes
+---
+
+
+```{r libraries, include = FALSE}
+suppressPackageStartupMessages(library(readr))
+suppressPackageStartupMessages(library(dplyr, warn.conflicts = FALSE))
+suppressPackageStartupMessages(library(tidyr))
+suppressPackageStartupMessages(library(forcats))
+suppressPackageStartupMessages(library(tibble))
+suppressPackageStartupMessages(library(stringr))
+suppressPackageStartupMessages(library(ggplot2))
+suppressPackageStartupMessages(library(knitr))
+suppressPackageStartupMessages(library(ggpubr))
+suppressPackageStartupMessages(library(phyloseq))
+suppressPackageStartupMessages(library(ape))
+suppressPackageStartupMessages(library(microbiome))
+suppressPackageStartupMessages(library(ANCOMBC))
+suppressPackageStartupMessages(library(kfigr))
+suppressPackageStartupMessages(library(grateful))
+```
+
+```{r constants}
+```
+
+```{r read-data, message=FALSE, include=FALSE}
+asvs <- read_tsv("../data/asv_table.tsv", col_types = 'ccid')
+metadata <- read_delim("../data/metadata.csv", delim = ",", col_types = cols(
+  .default = col_character(),
+  massindex = col_integer(),
+  SampleDate = col_date(format = "")
+)) 
+taxonomy <- read_tsv("../data/taxonomy.tsv", col_types =  cols(
+  asv = col_character(),
+  kingdom = col_character(),
+  phylum = col_character(),
+  class = col_character(),
+  order = col_character(),
+  family = col_character(),
+  genus = col_character(),
+  species = col_character()
+))
+
+# rename unclassified
+taxonomy  <- taxonomy %>%
+  naniar::replace_with_na_all(condition = ~.x %in%
+                                c("uncultured bacterium", "Ambiguous_taxa", "uncultured")) %>%
+  mutate(
+    phylum = ifelse(is.na(phylum), sprintf("%s unclassified", kingdom), phylum),
+    class = ifelse(is.na(class), sprintf("%s unclassified", str_remove(phylum, "unclassified")), class),
+    order = ifelse(is.na(order), sprintf("%s unclassified", str_remove(class, "unclassified")), order),
+    family = ifelse(is.na(family), sprintf("%s unclassified", str_remove(order, "unclassified")), family),
+    genus = ifelse(is.na(genus), sprintf("%s unclassified", str_remove(family, "unclassified")), genus),
+    species = ifelse(is.na(species), sprintf("%s unclassified", str_remove(genus, "unclassified")), species))
+```
+
+# Introduction
+
+testing for differential abundance testing between wild and captive samples with ANCOM (https://www.nature.com/articles/s41467-020-17041-7)
+
+
+# Results
+
+
+## ASVs
+
+```{r make-phyloseq-object, include = FALSE}
+str(asvs)
+
+asvsp <- asvs %>% left_join(metadata %>% select(sample, Asample)) %>% # join in as sometimes samplename gets strange if only numbers
+  select(asv, count, Asample) %>%
+  pivot_wider(names_from = 'Asample', values_from='count', values_fil= 0) %>%
+  tibble::column_to_rownames('asv') %>% as.matrix()
+
+taxonomyp <- taxonomy %>% tibble::column_to_rownames('asv') %>% as.matrix()
+metadatap <- metadata %>% tibble::column_to_rownames('Asample')
+
+OTU = otu_table(asvsp, taxa_are_rows = TRUE)
+TAX = tax_table(taxonomyp)
+samples = sample_data(metadatap)
+  
+pseq <- phyloseq(OTU, TAX, samples) # make pseq object
+print(pseq)
+
+rm(OTU, TAX, samples, taxonomyp, metadatap)
+```
+
+
+
+```{r run-ancombc, include = FALSE}
+# run ancombc ASV - same result if singletons were filtered out before running
+out <- ancombc(phyloseq = pseq, formula = "Population", 
+              p_adj_method = "BH", zero_cut = 0.90, lib_cut = 1000, 
+              neg_lb = TRUE, tol = 1e-5, 
+              max_iter = 100, conserve = TRUE, alpha = 0.05, global = FALSE)
+
+res <- out$res
+
+df <- res$beta %>% rownames_to_column("asv") %>% rename(Coef = PopulationWild) %>%
+  left_join(
+res$se  %>% rownames_to_column("asv") %>% rename(se = PopulationWild)) %>%
+  left_join(
+res$W %>% rownames_to_column("asv") %>% rename(Testst = PopulationWild)) %>%
+  left_join(
+res$p_val %>% rownames_to_column("asv") %>% rename(Pval = PopulationWild)) %>%
+  left_join(
+res$q %>% rownames_to_column("asv") %>% rename(AdjPval = PopulationWild)) %>%
+  left_join(
+res$diff_abn %>% rownames_to_column("asv") %>% rename(DiffAb = PopulationWild))
+
+# write table to plot with loading scores in betadiv script that is later used in "Betadiv.Rmd"
+#df %>% 
+#   mutate(overrep_inA= case_when(DiffAb ==TRUE & AdjPval < 0.05  & Coef > 0 ~ "Wild",
+#                           DiffAb ==TRUE & AdjPval < 0.05 & Coef < 0 ~ "Captive",
+#                           TRUE ~ "Notdiff"), 
+#          .before =1) %>% filter(overrep_inA !="Notdiff") %>%
+# write_tsv("../data/TableS2.tsv")
+```
+
+
+
+<p>&nbsp;</p>
+
+
+```{r plot-ancombc-asv,  fig.cap='**Figure 1.** Plot of ASVS identidied as differentiallt abundant wild and captive samples.',fig.height=15, fig.width=12, message=FALSE}
+df %>% 
+  left_join(taxonomy) %>%
+  left_join(df  %>% left_join(taxonomy) %>% select(phylum) %>% unique() %>% arrange(phylum) %>% mutate(Order  = 1:nrow(.))) %>%
+  mutate(family = fct_reorder(family, Order)) %>% 
+  filter(DiffAb ==TRUE & AdjPval < 0.05) %>%
+  ggplot(aes(x = Coef, y = family, colour = phylum)) + 
+      geom_point(alpha = 0.5 , size = 2) +
+      geom_errorbar(aes(xmin = Coef -se, xmax = Coef + se),
+                    width = 0, lwd = 1, alpha = 0.5) +
+      scale_x_continuous(name="\nLog fold change") + 
+      ylab("Family \n")  +
+  geom_vline(xintercept = 0, linetype="dotted", size=1.5) +
+      theme(axis.text = element_text(size=20),
+            axis.title = element_text(size=22), 
+            legend.text = element_text(size=20),
+            legend.title = element_text(size=22),
+            panel.grid.major = element_blank(),
+            panel.grid.minor = element_blank()) 
+```
+
+
+<p>&nbsp;</p>
+
+
+`r figr('sum-asvs', T, type = 'Table')` N ASVs over represented in wild (Coef > 0) or captive ( Coef < 0) samples with padj < 0.05 by ancombc.
+```{r sum-asvs, echo=FALSE}
+df %>%
+  mutate(overrep_inA= case_when(DiffAb ==TRUE & AdjPval < 0.05  & Coef > 0 ~ "Wild",
+                           DiffAb ==TRUE & AdjPval < 0.05 & Coef < 0 ~ "Captive",
+                           TRUE ~ "Notdiff"),
+         .before  =1) %>% 
+  rename('over represented in' = overrep_inA) %>% 
+  group_by(`over represented in`) %>% summarise(n =n()) %>% kable()
+```
+
+
+<p>&nbsp;</p>
+
+
+# R and packages
+
+This analysis was run with `r R.version$version.string`. Versions of packages used can be found in
+`r figr('cite-packages', T, type = 'Table')`.
+
+
+```{r cite-packages, cache = FALSE}
+cite_packages(pkgs ="Session", output = "table") %>%
+  kable()
+```
+
+
+
+<p>&nbsp;</p>
+
+# References
