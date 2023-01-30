@@ -32,10 +32,12 @@ suppressPackageStartupMessages(library(wesanderson))
 suppressPackageStartupMessages(library(grateful))
 suppressPackageStartupMessages(library(lme4))
 suppressPackageStartupMessages(library(sjPlot))
+suppressPackageStartupMessages(library(VennDiagram))
 ```
 
 ```{r constants}
 ```
+
 
 ```{r read-data, echo=FALSE, message=FALSE, warning=FALSE}
 asvs <- read_tsv("../data/asv_table.tsv", col_types = 'ccid')
@@ -199,7 +201,7 @@ taxonomy  <- taxonomy %>%
 
 ```{r TaxonomyplotWildvsCapt, echo=FALSE, fig.cap='**Figure 1a.** Taxonomyplot top 8 phyla faeces samples.Samples are either "Captive" (Mole-rat lab) or "Wild" (Kuruman River Reserve population)', fig.height=8, fig.width=12, message=FALSE, cache=FALSE}
 # caculate top8 phyla with highest prevalence
-top7phyla <- asvs %>% left_join(taxonomy) %>% select(sample, phylum) %>% unique() %>% 
+topphyla <- asvs %>% left_join(taxonomy) %>% select(sample, phylum) %>% unique() %>% 
   group_by(phylum) %>% summarise(Nsamples = n()) %>% arrange(desc(Nsamples)) %>% ungroup() %>%  
   left_join(
   asvs %>% filter(!is.na(count)) %>% 
@@ -210,7 +212,7 @@ top7phyla <- asvs %>% left_join(taxonomy) %>% select(sample, phylum) %>% unique(
   arrange(desc(Nsamples), desc(reads)) %>% mutate(Order  = 1:nrow(.))
 
 # caculate top10 class
-top10class <- asvs %>% 
+topclass <- asvs %>% 
   left_join(taxonomy) %>% select(sample, phylum, class) %>% unique() %>% 
   group_by(phylum, class) %>% summarise(Nsamples = n()) %>% arrange(desc(Nsamples)) %>% ungroup() %>%  
   left_join(
@@ -224,7 +226,7 @@ top10class <- asvs %>%
 ggarrange(
   asvs %>%
   inner_join(taxonomy, by = 'asv') %>%
-  left_join(top7phyla %>% transmute(phylum, topph = phylum), by = 'phylum') %>%
+  left_join(topphyla %>% transmute(phylum, topph = phylum), by = 'phylum') %>%
   group_by(topph, sample) %>%
   replace_na(list('topph' = 'Other phyla')) %>%
   summarise(relab = sum(relab)) %>%
@@ -240,7 +242,7 @@ ggarrange(
         axis.line.x=element_blank()),
   asvs %>% 
   inner_join(taxonomy, by = 'asv') %>%
-  left_join(top10class %>% transmute(class, topph = class), by = 'class') %>%
+  left_join(topclass %>% transmute(class, topph = class), by = 'class') %>%
   group_by(topph, sample) %>%
   replace_na(list('topph' = 'Other Classes')) %>%
   summarise(relab = sum(relab)) %>%
@@ -301,10 +303,10 @@ phylatable %>% kable(digits = 4)
 
 
 
-```{r relabsbox2, fig.cap = '**Figure 2.** Relative abundances of most phylum with 100 % prevalence. Samples are either "Captive" (orange) or "Wild" (green) by color and with boxplot show spread of raw data.', fig.width=12, fig.height = 6, message=FALSE, warning=FALSE, echo = FALSE}
+```{r relabsbox2, fig.cap = '**Figure 2.** Relative abundances of phylum with 100 % prevalence. Samples are either "Captive" (orange) or "Wild" (green) by color and with boxplot show spread of raw data.', fig.width=12, fig.height = 6, message=FALSE, warning=FALSE, echo = FALSE}
 plot2 <-asvs %>%
   inner_join(taxonomy, by = 'asv') %>%
-  left_join(top7phyla %>% transmute(phylum, topph = phylum), by = 'phylum') %>%
+  left_join(topphyla %>% transmute(phylum, topph = phylum), by = 'phylum') %>%
   replace_na(list('topph' = 'Other phyla')) %>%
   group_by(sample, topph) %>%
   summarise(relab = sum(relab)) %>%
@@ -312,7 +314,7 @@ plot2 <-asvs %>%
   ungroup() %>% 
   complete(sample, nesting(phylum), fill = list(relab = 0)) %>% 
   left_join(metadata %>% select(sample, Population)) %>%
-  left_join(top7phyla) %>%
+  left_join(topphyla) %>%
   replace_na(list('meanrelab' = 0)) %>%
   filter(Order < 3 ) %>%
   mutate(phylum =  fct_reorder(phylum, Order)) %>%
@@ -336,7 +338,7 @@ plot2 <-asvs %>%
 
 plot1 <- asvs %>%
   inner_join(taxonomy, by = 'asv') %>%
-  left_join(top7phyla %>% transmute(phylum, topph = phylum), by = 'phylum') %>%
+  left_join(topphyla %>% transmute(phylum, topph = phylum), by = 'phylum') %>%
   replace_na(list('topph' = 'Other phyla')) %>%
   group_by(sample, topph) %>%
   summarise(relab = sum(relab)) %>%
@@ -344,7 +346,7 @@ plot1 <- asvs %>%
   ungroup() %>% 
   complete(sample, nesting(phylum), fill = list(relab = 0)) %>% 
   left_join(metadata %>% select(sample, Population)) %>%
-  left_join(top7phyla) %>%
+  left_join(topphyla) %>%
   replace_na(list('Order' = 11)) %>%
   filter(Order > 2 ) %>%
   mutate(phylum =  fct_reorder(phylum, Order)) %>%
@@ -386,7 +388,7 @@ plot3 <- asvs %>%
   ungroup() %>% 
   complete(sample, nesting(phylum), fill = list(relab = 0)) %>% 
   left_join(metadata %>% select(sample, Population)) %>%
-  left_join(top7phyla) %>%
+  left_join(topphyla) %>%
   filter(is.na(Nsamples)) %>% # get phyla not in top 8
   ggplot(aes(x = phylum, y= relab)) +
   labs(y = "Log Relative Abundance", x ="") +
@@ -417,8 +419,8 @@ ggarrange(ggarrange(plot2 , plot1,nrow=1, ncol=2, align = "h", widths = c(3,8)),
 
 ```{r relabsboxplotfam, fig.width=10, fig.height = 8, fig.cap = '**Figure 4.** Relative abundances of the 12 families with highest prevalence (all samples).Samples are either "Captive" (orange) or "Wild" (green) by color and with boxplot show spread of raw data.', message=FALSE, warning=FALSE, echo = FALSE}
 
-# caculate top10 class
-top10fam <- asvs %>% 
+# caculate top10 fam
+topfam <- asvs %>% 
   left_join(taxonomy) %>% select(sample, phylum, family) %>% unique() %>% 
   group_by(phylum, family) %>% summarise(Nsamples = n()) %>% arrange(desc(Nsamples)) %>% ungroup() %>%  
   left_join(
@@ -431,7 +433,7 @@ top10fam <- asvs %>%
 
 asvs %>%
   inner_join(taxonomy, by = 'asv') %>%
-  left_join(top10fam %>% transmute(family, toppf = family), by = 'family') %>%
+  left_join(topfam %>% transmute(family, toppf = family), by = 'family') %>%
   filter(!is.na(toppf)) %>%
   group_by(sample, toppf) %>%
   summarise(relab = sum(relab)) %>%
@@ -439,7 +441,7 @@ asvs %>%
   ungroup() %>% 
   complete(sample, nesting(family), fill = list(relab = 0)) %>% 
   left_join(metadata %>% select(sample, Population)) %>%
-  left_join(top10fam) %>%
+  left_join(topfam) %>%
   mutate(familyp = paste(phylum, family)) %>%
   arrange(phylum) %>%
   ggplot(aes(x = familyp, y= relab)) +
@@ -605,6 +607,91 @@ tab_model(m2, show.ci = 0.95, show.se = 0.95)
 
 <p>&nbsp;</p>
 
+# Shared and unique ASVs
+
+```{r VenndiagramAll, eval=FALSE, fig.cap='**Figure 6. Venndiagram all asvs. **', fig.height=5, fig.width=5, message=FALSE, warning=FALSE, include=FALSE}
+Captive <- asvs %>% left_join(metadata) %>% filter(Population =="Captive") %>% select(asv) %>% unique() 
+Captive <- Captive$asv
+Wild <- asvs %>% left_join(metadata) %>% filter(Population =="Wild") %>% select(asv) %>% unique() 
+Wild <- Wild$asv
+
+venn.diagram(
+        x = list(Captive, Wild),
+        category.names = c("Captive" , "Wild"),
+        filename = NULL,
+        output=TRUE,
+        
+        # Output features
+        imagetype="tiff" ,
+        height = 480 , 
+        width = 480 , 
+        resolution = 300,
+        compression = "lzw",
+        
+        # Circles
+        lwd = 2,
+        lty = 'blank',
+        fill = pal,
+        
+        # Numbers
+        cex = .6,
+        fontface = "bold",
+        
+        # Set names
+        cat.cex = 0.6,
+        cat.fontface = "bold",
+        cat.default.pos = "outer",
+        cat.pos = c(-27, 27),
+        cat.dist = c(0.055, 0.055)
+)
+
+```
+
+
+<p>&nbsp;</p>
+
+`r figr('shared-asvs-taxa', T, type = 'Table')`. Table of ASVs shared between wild and captive animals and their phylum assignment, sum of their count of reads and proportion of complete dataset.
+```{r shared-asvs-taxa, message=FALSE, warning=FALSE}
+# what taxa are the shared ASVs dominated by?
+sharedASVs <- asvs %>% left_join(metadata %>% select(sample, Population)) %>% select(sample, asv, Population) %>%
+  mutate(N = 1 ) %>% select (-sample) %>% unique() %>% pivot_wider(names_from = 'Population', values_from = 'N', values_fill = 0) %>%
+  filter(Captive > 0 & Wild > 0) %>% select(asv)
+
+# sum by phylum
+t <- sharedASVs %>%
+  left_join(taxonomy) %>%
+  left_join(topphyla %>% transmute(phylum, topph = phylum), by = 'phylum') %>%
+  replace_na(list('topph' = 'Other phyla')) %>%
+  group_by(topph) %>%
+  summarise(NAsvs = n()) %>% rename(phylum = topph) %>%
+  left_join(
+    sharedASVs %>%
+    left_join(asvs) %>%
+    left_join(taxonomy) %>%
+    left_join(topphyla %>% transmute(phylum, topph = phylum), by = 'phylum') %>%
+    replace_na(list('topph' = 'Other phyla')) %>%
+    group_by(topph) %>%
+    summarise(sumReads = sum(count)) %>% 
+    mutate(prop_reads = sumReads/(asvs %>% summarise(sumcount = sum(count)) %>% pull())) %>%
+    rename(phylum = topph)) %>% # follow the distribution of phylum full dataset)
+  left_join(topphyla %>% select(phylum, Order)) %>% #join in to sort by 
+    replace_na(list('Order' = 8)) %>% 
+    arrange(Order) %>% select(-Order)
+
+t %>% kable()
+
+# write table
+#t %>% mutate_if(is.numeric, ~round(., 3)) %>%
+#  write.table(file ="Shared.txt", row.names = F)
+```
+
+
+<p>&nbsp;</p>
+
+So, how many sequences belonged to the shared ASVs? `r sharedASVs %>% left_join(asvs) %>% summarise(sumcount = sum(count)) %>% pull()`, this is equal to `r sharedASVs %>% left_join(asvs) %>% summarise(sumcount = sum(count)) %>% pull() / asvs %>% summarise(sumcount = sum(count))*100`% of the complete data!
+
+
+<p>&nbsp;</p>
 
 # R and packages
 
